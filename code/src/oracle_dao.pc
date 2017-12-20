@@ -1,0 +1,150 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include "../inc/dao.h"
+#include "../inc/bank.h"
+exec sql include sqlca;
+
+exec sql begin declare section;
+	char* g_user_passwd = "openlab/open123";
+	int g_id;
+	char g_name[50];
+	char g_passwd[9];
+	double g_money;
+	double g_balance;
+exec sql end   declare section;
+
+int connect_db(void)
+{
+	exec sql connect: g_user_passwd;
+	if (0 == sqlca.sqlcode)
+	{
+		printf("Connect Success\n");
+		return 0;
+	}
+	printf("%s\n", sqlca.sqlerrm.sqlerrmc);
+	return -1;
+}
+
+int is_success(const char* info)
+{
+	if (0 == sqlca.sqlcode)
+	{
+		printf("%s\n", info);
+		exec sql commit work release;
+		return 0;
+	}
+	printf("%s\n", sqlca.sqlerrm.sqlerrmc);
+	exec sql rollback work release;
+	return -1;
+}
+
+int genid(void)
+{
+	int fd = open("id.dat", O_CREAT | O_RDWR, 0644);
+	if (-1 == fd)
+	{
+		perror("open");
+		return -1;	
+	}
+	int id = 1000;
+	printf("fd == %d\n", fd);
+	if (-1 == read(fd, &id, sizeof(id)))
+	{
+		perror("read");
+		return -1;
+	}
+	printf("dao.c\n");
+	id++;
+	if (-1 == lseek(fd, 0, SEEK_SET))
+	{
+		perror("lseek");
+		return -1;
+	}
+	if (-1 == write(fd, &id, sizeof(id)))
+	{
+		perror("write");	
+		return -1;	
+	}
+	close(fd);
+	return id;
+}
+
+int save(const ACCOUNT* acc)
+{
+	if (-1 == connect_db())
+	{
+		return -1;
+	}
+	strcpy(g_name, acc->name);
+	strcpy(g_passwd, acc->passwd);
+	g_balance = acc->balance;
+	g_id = acc->id;
+	
+	exec sql insert into rr_user_bank values(:g_id, :g_name, :g_passwd, :g_balance);
+	return is_success("Save Sucess\n");
+}
+
+int get(int id, ACCOUNT* acc)
+{
+	if (-1 == connect_db())
+	{
+		return -1;
+	}
+	g_id = acc->id;
+	exec sql select * into :g_id, :g_name, :g_passwd, :g_balance from rr_user_bank where id = :g_id;
+	strcpy(acc->name, g_name);
+	strcpy(acc->passwd, g_passwd);
+	acc->balance = g_balance;
+	
+	return is_success("Get User Message Sucess \n");
+}
+
+
+int transfer(int destination_id, int source_id, double money)
+{
+	if (-1 == connect_db())
+	{
+		return -1;
+	}
+	g_money = money;
+	g_id = source_id;
+	exec sql update rr_user_bank set balance = balance - :g_money
+			 where id = :g_id;
+	int sqlcode1 = sqlca.sqlcode;
+	exec sql update rr_user_bank set balance = balnace + :g_money where id = :g_id;
+	int sqlcode2 = sqlca.sqlcode;
+	if ((0 == sqlcode1) && (0 == sqlcode2))
+	{
+		exec sql commit work release;
+		return 0;
+	}
+	exec sql rollback work release;
+	return -1;
+}
+
+int update(const ACCOUNT* acc)
+{
+	if (-1 == connect_db())
+	{
+		return -1;
+	}
+	g_id = acc->id;
+	g_balance = acc->balance;
+	exec sql update rr_user_bank set balance = :g_balance where id =:g_id;
+	return is_success("Update Sucess\n");
+}
+
+int delete(int id)
+{
+	if (-1 == connect_db())
+	{
+		return -1;
+	}
+	g_id = id;
+	exec sql delete from rr_user_bank where id = :g_id;
+	return is_success("Delete User Acc Sucess\n");
+}
+
